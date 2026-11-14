@@ -10,19 +10,34 @@ Given a photo or drawing of a single-line expression, the system:
 3. Reconstructs the expression with a rule-based, layout-aware parser (superscripts, fractions, integrals, derivatives) and converts it to LaTeX.
 4. Solves or evaluates it symbolically with SymPy.
 
+## Quick Start
+
+```bash
+pip install -r requirements.txt
+jupyter notebook CNN.ipynb
+```
+
+Run all cells. The notebook loads the trained weights from `weights/` and runs on the images in `examples/`. No dataset or GPU is needed.
+
 ## Repository Contents
 
-| File | Description |
+| Path | Description |
 |---|---|
 | `CNN.ipynb` | Full pipeline using a 3-layer CNN classifier |
-| `ViT.ipynb` | Same pipeline using a Vision Transformer classifier, plus a per-class classification report |
+| `ViT.ipynb` | Same pipeline using a Vision Transformer classifier |
+| `weights/cnn.pth`, `weights/vit.pth` | Trained model weights (0.5 MB and 0.9 MB) |
+| `examples/` | 11 handwritten expressions covering each supported feature |
+| `scripts/download_data.py` | Downloads the training data from Kaggle and builds `data/` |
+| `requirements.txt` | Python dependencies |
 
 ## Dataset
 
-- **Source**: [Kaggle - Handwritten Math Symbols](https://www.kaggle.com/datasets/xainano/handwrittenmathsymbols)
+- **Source**: [Kaggle - Handwritten Math Symbols](https://www.kaggle.com/datasets/xainano/handwrittenmathsymbols) (430 MB download)
 - We train on a **24-class subset** of the dataset: digits `0`–`9`, `+`, `-`, `(`, `)`, `=`, `x`, `d`, `/`, `∫`, `<`, `>`, `≤`, `≥`, `≠`.
-- 233,605 images in that subset, split 95/5 into 221,924 training and 11,681 validation images.
+- 232,465 images in that subset, split 95/5 into 220,841 training and 11,624 validation images (fixed seed).
 - Preprocessing: grayscale, resize to 45×45, adaptive mean thresholding, then inversion (white symbol on black).
+
+The `/` class has only 199 images in the Kaggle data. The original project runs used a custom set of 1,339 slash images, which isn't published, so the committed weights recognize `/` less reliably than the originals did.
 
 ## Pipeline Details
 
@@ -33,44 +48,57 @@ Given a photo or drawing of a single-line expression, the system:
 **Segmentation**
 - Illumination normalization (divide by a Gaussian blur), adaptive thresholding, and morphological opening.
 - External contours are boxed; boxes that are too small or nearly empty are discarded.
-- Boxes that overlap by at least 70% horizontally are merged, so multi-stroke symbols such as `=`, `≤`, and `÷` become one box.
+- Boxes that overlap by at least 70% horizontally are merged, so multi-stroke symbols such as `=` and `≤` become one box.
 - Each box is cropped and padded to 45×45 to match the training images. Boxes with more than 30% ink are treated as a dot (`*`, multiplication).
 
 **Parsing**
-- Symbols are read left to right. A symbol shorter than 70% of the previous base symbol and positioned above it is treated as a superscript (`x2` → `x^2`).
+- Symbols are read left to right. A symbol shorter than 70% of the previous base symbol and positioned above it is treated as a superscript (`x2` → `x^2`); multi-symbol exponents are grouped (`5^(8-4)`).
 - Tokens are converted to LaTeX: `a / b` → `\frac{a}{b}`, `∫ … d x` → integral, `d / d x (…)` → derivative.
 
 **Solving** (SymPy)
 - Derivatives and integrals are computed.
 - Inequalities (`<`, `>`, `≤`, `≥`, `≠`) are simplified.
 - Equations are solved for `x`.
-- Plain arithmetic is evaluated; other expressions fall back to `latex2sympy2`.
+- Plain arithmetic is evaluated; implicit multiplication such as `2x` is supported. Other expressions fall back to SymPy's LaTeX parser.
 
 ## Results
 
-| Model | Validation accuracy |
+**Symbol classification** (5% validation split; no separate held-out test set):
+
+| Model | Validation accuracy | Training time (Apple M-series, MPS) |
+|---|---|---|
+| CNN | **99.17%** (3 epochs) | ~4 min |
+| ViT | 98.31% (4 epochs) | ~23 min |
+
+The original project runs reported 98.98% (CNN) and 97.04% (ViT) with a slightly different dataset (see the `/` note above).
+
+**End-to-end** on 21 handwritten test expressions that use only the 24 supported symbols, counting an expression as correct when it is read exactly and solved correctly:
+
+| Model | Correct |
 |---|---|
-| CNN | **98.98%** (after 3 epochs) |
-| ViT | 97.04% (after 4 epochs; peak 97.84% after epoch 3) |
+| CNN | **14 / 21** |
+| ViT | 8 / 21 |
 
-These are accuracies on the 5% validation split; no separate held-out test set was used. In the ViT's per-class report, the weakest classes are the rare comparison symbols (`≥` F1 0.81, `>` 0.82, `≠` 0.86), which have only 8–53 validation samples each.
+The ViT's per-symbol accuracy is close to the CNN's, but it transfers worse to real handwritten equations: it often reads `1` as `d`, for example. The CNN's misses are mostly `/` read as `x`, a missed multiplication dot, and similar-looking digits.
 
-End-to-end examples from the notebooks:
-- CNN: handwritten `x^2 - 9 = 0` → `[-3, 3]`
-- ViT: handwritten `1 + 3 ÷ 4` → `7/4`
+All 11 images in `examples/` are recognized and solved correctly by the CNN, for example:
+- `x^2 - 9 = 0` → `[-3, 3]`
+- `∫(5+2x) dx` → `x**2 + 5*x`
+- `4^2 + 3^(-1)` → `49/3`
+- `-6 + 7 ≥ -9` → `True`
 
-## Running the Notebooks
+## Retraining
 
-Requirements: `torch`, `torchvision`, `opencv-python`, `numpy`, `matplotlib`, `scikit-learn`, `sympy`, `latex2sympy2`, `tqdm`, `Pillow`.
+```bash
+pip install -r requirements.txt
+python scripts/download_data.py
+```
 
-The dataset, trained weights, and test images are not included in this repository. To run:
-1. Download the Kaggle dataset and place the class folders under `data/` (one folder per class, as `ImageFolder` expects).
-2. Run the training cells. They save `main1.pth` (CNN) or `eqn-detect1-model3.pth` (ViT).
-3. Put test images in `test/test/` and set `test_filename` in the test cell.
-4. Run the last cell (which defines `solve_tokens`) before the test cell.
+This downloads the Kaggle dataset with `kagglehub`, extracts it, and copies the 24 classes into `data/`. If you already have the extracted dataset, use `python scripts/download_data.py --source path/to/extracted_images`. Then set `TRAIN = True` in the first code cell of either notebook and run all cells. The new weights are saved to `weights/`, and a per-class validation report is printed.
 
 ## Limitations
 
 - Supports single-line expressions only. Stacked fractions, square roots, subscripts, and multi-line layouts are not handled.
+- Only the 24 symbol classes above are recognized; for example, `×` and `÷` are not.
 - In `a / b`, only the single token after `/` is used as the denominator.
 - Equations are solved for `x` only.
