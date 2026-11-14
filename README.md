@@ -46,13 +46,21 @@ The `/` class has only 199 images in the Kaggle data. The original project runs 
 - **ViT**: 5×5 patches (81 patches per 45×45 image), 64-dim embeddings, 6 encoder layers, 8 attention heads. Trained for 4 epochs with the same optimizer settings.
 
 **Segmentation**
-- Illumination normalization (divide by a Gaussian blur), adaptive thresholding, and morphological opening.
-- External contours are boxed; boxes that are too small or nearly empty are discarded.
-- Boxes that overlap by at least 70% horizontally are merged, so multi-stroke symbols such as `=` and `≤` become one box.
-- Each box is cropped and padded to 45×45 to match the training images. Boxes with more than 30% ink are treated as a dot (`*`, multiplication).
+
+No threshold is a fixed pixel count. Each one scales with the image's own measured stroke width (from a distance transform) and typical symbol height, so the same settings work on small scans and large phone photos.
+- **Binarization**: divide by a Gaussian blur sized to the image, which removes shadows and paper tint, then apply Otsu's threshold. Hysteresis keeps faint pencil strokes when they connect to darker ink.
+- **Components**: gaps up to one stroke width are bridged, for example where a faint stroke crosses a dark one. Specks smaller than a pen dot are dropped.
+- **Grouping**: pieces of one symbol are merged into one box.
+  - Stacked strokes of similar width, either centred or two flat bars, form one symbol: `=`, `≤`, `≥`, `≠`.
+  - Small broken-off fragments within a stroke width of a larger piece are joined to it.
+  - Dots and exponents are never glued onto a neighbouring `)`.
+- **Dots**: a small, solid, roundish blob inside the line of text is a multiplication dot (`*`).
+- **Patches**: each symbol's own ink is centred in a 45×45 patch, keeping its aspect ratio, and thinned to 1-pixel strokes. The training images have 1-pixel strokes, so the patches match them.
 
 **Parsing**
-- Symbols are read left to right. A symbol shorter than 70% of the previous base symbol and positioned above it is treated as a superscript (`x2` → `x^2`); multi-symbol exponents are grouped (`5^(8-4)`).
+- All symbols are classified in one batch. If a bracket is unmatched, the classifier's second choices fix it: the symbol most likely to be the missing `(` or `)` is changed, since `(` and `1` look alike.
+- Symbols are read left to right. A symbol is a superscript when, relative to the base symbol before it, it is noticeably smaller and raised, or sits almost entirely above it (`x2` → `x^2`).
+- Multi-symbol exponents are grouped (`5^(8-4)`). An exponent can't start with an operator, and `-` starts one only before another raised symbol (`3^(-1)`).
 - Tokens are converted to LaTeX: `a / b` → `\frac{a}{b}`, `∫ … d x` → integral, `d / d x (…)` → derivative.
 
 **Solving** (SymPy)
@@ -72,20 +80,26 @@ The `/` class has only 199 images in the Kaggle data. The original project runs 
 
 The original project runs reported 98.98% (CNN) and 97.04% (ViT) with a slightly different dataset (see the `/` note above).
 
-**End-to-end** on 21 handwritten test expressions that use only the 24 supported symbols, counting an expression as correct when it is read exactly and solved correctly:
+**End-to-end** on handwritten equations that use only the 24 supported symbols, counting an equation as correct when it is read exactly (and, for the first set, also solved correctly):
 
-| Model | Correct |
-|---|---|
-| CNN | **14 / 21** |
-| ViT | 8 / 21 |
+| Model | 21 test equations (read + solved) | 10 more equations (read) | 16 single-symbol images |
+|---|---|---|---|
+| CNN, original segmentation | 14 / 21 | 5 / 10 | — |
+| ViT, original segmentation | 8 / 21 | 2 / 10 | — |
+| **CNN** | **21 / 21** | **10 / 10** | **16 / 16** |
+| ViT | 19 / 21 | 10 / 10 | 16 / 16 |
 
-The ViT's per-symbol accuracy is close to the CNN's, but it transfers worse to real handwritten equations: it often reads `1` as `d`, for example. The CNN's misses are mostly `/` read as `x`, a missed multiplication dot, and similar-looking digits.
+Most of the gain comes from the scale-adaptive segmentation and the 1-pixel stroke thinning, not from the classifier. The ViT's two remaining misses both read `/` as `1`; `/` has only 199 training images.
 
-All 11 images in `examples/` are recognized and solved correctly by the CNN, for example:
+The segmentation rules were developed while looking at the 31 equations, so expect lower accuracy on new handwriting. The single-symbol images weren't used during development.
+
+All 11 images in `examples/` are recognized and solved correctly by both models, for example:
 - `x^2 - 9 = 0` → `[-3, 3]`
 - `∫(5+2x) dx` → `x**2 + 5*x`
-- `4^2 + 3^(-1)` → `49/3`
+- `4^2 + 3^(-1)` → `\frac{49}{3}`
 - `-6 + 7 ≥ -9` → `True`
+
+**Speed**: about 40 ms per image on an Apple M-series laptop, mostly segmentation. The CNN classifies all symbols of an equation in about 4 ms on a single CPU core.
 
 ## Retraining
 
@@ -102,3 +116,4 @@ This downloads the Kaggle dataset with `kagglehub`, extracts it, and copies the 
 - Only the 24 symbol classes above are recognized; for example, `×` and `÷` are not.
 - In `a / b`, only the single token after `/` is used as the denominator.
 - Equations are solved for `x` only.
+- Decimal points aren't supported: a dot is always read as multiplication.
