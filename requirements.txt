@@ -9,4 +9,5 @@ antlr4-python3-runtime==4.11.*   # required by sympy.parsing.latex
 tqdm>=4.66
 pillow>=10.0
 jupyter
+gradio>=6.0                       # only needed for app.py (web demo)
 kagglehub                         # only needed for scripts/download_data.py
