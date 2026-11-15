@@ -19,6 +19,29 @@ jupyter notebook CNN.ipynb
 
 Run all cells. The notebook loads the trained weights from `weights/` and runs on the images in `examples/`. No dataset or GPU is needed.
 
+## Web Demo
+
+```bash
+pip install -r requirements.txt
+python app.py
+```
+
+Open http://127.0.0.1:7860, then upload a photo, take one with the webcam, paste from the clipboard, or draw an equation on the canvas. The page shows how the equation was read, the result, the detected symbols and the 45×45 patches the classifier saw. You can switch between the CNN and the ViT.
+
+To publish it as a free [Hugging Face Space](https://huggingface.co/spaces), log in once with `hf auth login`, then run:
+
+```bash
+python scripts/deploy_space.py YOUR_USERNAME/handwritten-math
+```
+
+The pipeline is also importable from Python:
+
+```python
+from recognizer import load_model, recognize
+result = recognize('examples/quadratic.png', load_model('cnn'))
+print(result['equation'], result['result'])   # x^2-9=0 [-3, 3]
+```
+
 ## Repository Contents
 
 | Path | Description |
@@ -27,7 +50,10 @@ Run all cells. The notebook loads the trained weights from `weights/` and runs o
 | `ViT.ipynb` | Same pipeline using a Vision Transformer classifier |
 | `weights/cnn.pth`, `weights/vit.pth` | Trained model weights (0.5 MB and 0.9 MB) |
 | `examples/` | 11 handwritten expressions covering each supported feature |
+| `app.py` | Web demo (Gradio): upload or draw an equation |
+| `recognizer.py` | The pipeline as an importable module, with the same code as the notebooks |
 | `scripts/download_data.py` | Downloads the training data from Kaggle and builds `data/` |
+| `scripts/deploy_space.py` | Publishes the web demo as a Hugging Face Space |
 | `requirements.txt` | Python dependencies |
 
 ## Dataset
